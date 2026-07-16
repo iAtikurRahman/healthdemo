@@ -1,0 +1,202 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Division {
+  id        String     @id @default(cuid())
+  name      String
+  nameBn    String
+  lat       Float
+  lng       Float
+  districts District[]
+
+  @@map("divisions")
+}
+
+model District {
+  id          String   @id @default(cuid())
+  name        String
+  nameBn      String
+  divisionId  String
+  division    Division @relation(fields: [divisionId], references: [id])
+  population  Int
+  lat         Float
+  lng         Float
+  riskLevel   String
+  healthIndex Float
+  literacyRate Float
+  areaSqKm    Float
+
+  hospitals      Hospital[]
+  diseaseRecords DiseaseRecord[]
+  patients       Patient[]
+  ambulances     Ambulance[]
+  vaccinations   Vaccination[]
+  alerts         Alert[]
+  incidents      EmergencyIncident[]
+
+  @@index([divisionId])
+  @@map("districts")
+}
+
+model Hospital {
+  id                String   @id @default(cuid())
+  name              String
+  type              String
+  districtId        String
+  district          District @relation(fields: [districtId], references: [id])
+  lat               Float
+  lng               Float
+  beds              Int
+  availableBeds     Int
+  icuBeds           Int
+  icuAvailable      Int
+  ventilators       Int
+  ventilatorsInUse  Int
+  nursesCount       Int
+  waitingTimeMin    Int
+  occupancyRate     Float
+  satisfactionScore Float
+  performanceScore  Float
+  established       Int
+  hasEmergency      Boolean
+
+  doctors        Doctor[]
+  patients       Patient[]
+  medicineStocks MedicineStock[]
+
+  @@index([districtId])
+  @@map("hospitals")
+}
+
+model Doctor {
+  id              String   @id @default(cuid())
+  name            String
+  hospitalId      String
+  hospital        Hospital @relation(fields: [hospitalId], references: [id])
+  specialty       String
+  experienceYears Int
+  patientsPerDay  Int
+  available       Boolean
+  rating          Float
+
+  @@index([hospitalId])
+  @@map("doctors")
+}
+
+model Patient {
+  id            String   @id @default(cuid())
+  name          String
+  age           Int
+  gender        String
+  districtId    String
+  district      District @relation(fields: [districtId], references: [id])
+  hospitalId    String
+  hospital      Hospital @relation(fields: [hospitalId], references: [id])
+  disease       String
+  admissionDate DateTime
+  status        String
+  severity      String
+
+  @@index([districtId])
+  @@index([hospitalId])
+  @@index([disease])
+  @@map("patients")
+}
+
+model DiseaseRecord {
+  id         String   @id @default(cuid())
+  disease    String
+  districtId String
+  district   District @relation(fields: [districtId], references: [id])
+  date       DateTime
+  cases      Int
+  deaths     Int
+  recovered  Int
+  riskScore  Float
+
+  @@index([districtId])
+  @@index([disease])
+  @@index([date])
+  @@map("disease_records")
+}
+
+model MedicineStock {
+  id           String   @id @default(cuid())
+  name         String
+  category     String
+  hospitalId   String
+  hospital     Hospital @relation(fields: [hospitalId], references: [id])
+  stockLevel   Int
+  capacity     Int
+  unit         String
+  status       String
+  reorderLevel Int
+
+  @@index([hospitalId])
+  @@map("medicine_stocks")
+}
+
+model Ambulance {
+  id         String   @id @default(cuid())
+  code       String
+  districtId String
+  district   District @relation(fields: [districtId], references: [id])
+  status     String
+  type       String
+  lat        Float
+  lng        Float
+
+  @@index([districtId])
+  @@map("ambulances")
+}
+
+model Vaccination {
+  id                 String   @id @default(cuid())
+  districtId         String
+  district           District @relation(fields: [districtId], references: [id])
+  vaccine            String
+  date               DateTime
+  dosesAdministered  Int
+  targetPopulation   Int
+  coveragePercent    Float
+
+  @@index([districtId])
+  @@index([date])
+  @@map("vaccinations")
+}
+
+model Alert {
+  id          String    @id @default(cuid())
+  title       String
+  description String    @db.Text
+  category    String
+  priority    String
+  districtId  String?
+  district    District? @relation(fields: [districtId], references: [id])
+  aiGenerated Boolean
+  createdAt   DateTime  @default(now())
+
+  @@index([districtId])
+  @@map("alerts")
+}
+
+model EmergencyIncident {
+  id                 String   @id @default(cuid())
+  type               String
+  districtId         String
+  district           District @relation(fields: [districtId], references: [id])
+  severity           String
+  status             String
+  startedAt          DateTime
+  affectedPopulation Int
+  description        String   @db.Text
+
+  @@index([districtId])
+  @@map("emergency_incidents")
+}
