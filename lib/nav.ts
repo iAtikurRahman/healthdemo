@@ -9,6 +9,7 @@ import {
   Siren,
   MonitorPlay,
   Network,
+  Target,
 } from "lucide-react";
 
 export interface NavItem {
@@ -26,6 +27,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/diseases", label: "Disease Surveillance", description: "Outbreak monitoring", icon: Activity },
   { href: "/resources", label: "Resource Management", description: "Staff, stock & equipment", icon: Boxes },
   { href: "/emergency", label: "Emergency Response", description: "Live incident coordination", icon: Siren },
+  { href: "/actiondashboard", label: "Action Dashboard", description: "Worst hospital hotspots, ranked for support", icon: Target },
   { href: "/command-center", label: "Command Center", description: "Full-screen national ops view", icon: MonitorPlay },
   { href: "/architecture", label: "Architecture", description: "Platform data architecture", icon: Network },
 ];

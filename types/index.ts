@@ -117,6 +117,63 @@ export interface HospitalRow {
   doctorsAvailable: number;
 }
 
+export interface CriticalHospital {
+  id: string;
+  name: string;
+  type: string;
+  districtName: string;
+  divisionName: string;
+  districtRiskLevel: string;
+  beds: number;
+  availableBeds: number;
+  occupancyRate: number;
+  icuBeds: number;
+  icuAvailable: number;
+  ventilators: number;
+  ventilatorsInUse: number;
+  waitingTimeMin: number;
+  hasEmergency: boolean;
+  activePatients: number;
+  criticalPatients: number;
+  severePatients: number;
+  criticalRatio: number;
+  activeDistrictIncidents: number;
+  criticalityScore: number;
+  concerns: string[];
+}
+
+export interface CriticalHospitalDetail extends CriticalHospital {
+  nursesCount: number;
+  doctorsTotal: number;
+  doctorsAvailable: number;
+  scoreBreakdown: {
+    patientSeverityPressure: number;
+    occupancyPressure: number;
+    icuPressure: number;
+    ventilatorPressure: number;
+    waitingPressure: number;
+  };
+  severityBreakdown: { mild: number; moderate: number; severe: number; critical: number };
+  recentIncidents: {
+    id: string;
+    type: string;
+    severity: string;
+    status: string;
+    startedAt: string;
+    affectedPopulation: number;
+    description: string;
+  }[];
+  recentAlerts: {
+    id: string;
+    title: string;
+    description: string;
+    category: string;
+    priority: string;
+    aiGenerated: boolean;
+    createdAt: string;
+  }[];
+}
+
 export interface SavedReport {
   id: string;
   title: string;
