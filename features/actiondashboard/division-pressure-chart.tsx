@@ -22,12 +22,12 @@ export function DivisionPressureChart({ hospitals, isLoading }: { hospitals?: Cr
   return (
     <ChartCard title="Pressure by Division" subtitle="Average hospital criticality score, national comparison" height={300}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS_COLOR }} tickLine={false} axisLine={{ stroke: GRID_COLOR }} angle={-25} textAnchor="end" height={60} interval={0} />
-          <YAxis tick={{ fontSize: 11, fill: AXIS_COLOR }} tickLine={false} axisLine={{ stroke: GRID_COLOR }} width={32} domain={[0, 100]} />
+        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} horizontal={false} />
+          <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: AXIS_COLOR }} tickLine={false} axisLine={{ stroke: GRID_COLOR }} />
+          <YAxis type="category" dataKey="label" tick={{ fontSize: 11, fill: AXIS_COLOR }} tickLine={false} axisLine={{ stroke: GRID_COLOR }} width={88} />
           <Tooltip content={<ChartTooltip />} />
-          <Bar dataKey="Avg. Criticality" fill={CHART_SERIES[3]} radius={[4, 4, 0, 0]} maxBarSize={36} />
+          <Bar dataKey="Avg. Criticality" fill={CHART_SERIES[3]} radius={[0, 4, 4, 0]} maxBarSize={22} />
         </BarChart>
       </ResponsiveContainer>
     </ChartCard>

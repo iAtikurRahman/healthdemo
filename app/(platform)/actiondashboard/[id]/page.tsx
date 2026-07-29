@@ -4,17 +4,17 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ArrowLeft, BedDouble, HeartPulse, Siren, Clock } from "lucide-react";
+import { ArrowLeft, BedDouble, Stethoscope, Siren, Activity, ChevronRight, Trophy, ArrowUpRight } from "lucide-react";
+import { FcIdea } from "react-icons/fc";
 import { GlassCard } from "@/components/shared/glass-card";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ProgressMeter } from "@/components/shared/progress-meter";
 import { AnimatedCounter } from "@/components/shared/animated-counter";
-import { AlertCard } from "@/components/shared/alert-card";
-import { Timeline, type TimelineEvent } from "@/components/shared/timeline";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatDate, formatTime } from "@/lib/format";
-import { scoreTone, scoreLabel } from "@/features/actiondashboard/score-utils";
-import type { CriticalHospitalDetail, AlertItem } from "@/types";
+import { Button } from "@/components/ui/button";
+import { scoreTone, scoreLabel, SCORE_BORDER } from "@/features/actiondashboard/score-utils";
+import type { CriticalHospitalDetail, AiSuggestionsResponse } from "@/types";
 
 async function fetchHospitalDetail(id: string): Promise<CriticalHospitalDetail> {
   const res = await fetch(`/api/actiondashboard/${id}`);
@@ -22,10 +22,16 @@ async function fetchHospitalDetail(id: string): Promise<CriticalHospitalDetail> 
   return (await res.json()).data;
 }
 
-const INCIDENT_STATUS_TONE: Record<string, "critical" | "warning" | "good"> = {
-  Active: "critical",
-  Contained: "warning",
-  Resolved: "good",
+async function fetchAiSuggestions(id: string): Promise<AiSuggestionsResponse> {
+  const res = await fetch(`/api/actiondashboard/${id}/suggestions`);
+  if (!res.ok) throw new Error("Failed to load AI suggestions");
+  return (await res.json()).data;
+}
+
+const PRIORITY_TONE: Record<AiSuggestionsResponse["suggestions"][number]["priority"], "critical" | "warning" | "good"> = {
+  High: "critical",
+  Medium: "warning",
+  Low: "good",
 };
 
 function pressureTone(value: number, highThreshold: number, midThreshold: number): "critical" | "warning" | "good" {
@@ -39,6 +45,16 @@ export default function HospitalDetailPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["actiondashboard", id],
     queryFn: () => fetchHospitalDetail(id),
+  });
+  const {
+    data: aiSuggestions,
+    isLoading: aiLoading,
+    isError: aiError,
+  } = useQuery({
+    queryKey: ["actiondashboard", id, "ai-suggestions"],
+    queryFn: () => fetchAiSuggestions(id),
+    enabled: !!id,
+    retry: false,
   });
 
   if (isLoading || !data) {
@@ -57,26 +73,6 @@ export default function HospitalDetailPage() {
 
   const tone = scoreTone(data.criticalityScore);
 
-  const incidentEvents: TimelineEvent[] = data.recentIncidents.map((inc) => ({
-    id: inc.id,
-    title: inc.type,
-    description: inc.description,
-    timestamp: `${formatDate(inc.startedAt)} · ${formatTime(inc.startedAt)}`,
-    tone: INCIDENT_STATUS_TONE[inc.status] ?? "warning",
-    badge: inc.status,
-  }));
-
-  const alertItems: AlertItem[] = data.recentAlerts.map((a) => ({
-    id: a.id,
-    title: a.title,
-    description: a.description,
-    category: a.category,
-    priority: a.priority as AlertItem["priority"],
-    districtName: data.districtName,
-    aiGenerated: a.aiGenerated,
-    createdAt: a.createdAt,
-  }));
-
   return (
     <div className="mx-auto max-w-[1200px] space-y-6">
       <Link href="/actiondashboard" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground">
@@ -87,12 +83,9 @@ export default function HospitalDetailPage() {
         <GlassCard className="p-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl font-semibold tracking-tight">{data.name}</h1>
-                {data.hasEmergency && <StatusBadge tone="critical" label="Emergency" showIcon={false} />}
-              </div>
+              <h1 className="text-xl font-semibold tracking-tight">{data.name}</h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                {data.type} · {data.districtName}, {data.divisionName} · District risk: {data.districtRiskLevel}
+                {data.upazilaName}, {data.districtName}, {data.divisionName} &middot; {data.reportYear} report
               </p>
               {data.concerns.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
@@ -113,40 +106,86 @@ export default function HospitalDetailPage() {
                 {data.criticalityScore.toFixed(0)}
                 <span className="text-sm text-muted-foreground">/100</span>
               </span>
-              <span className="text-xs text-muted-foreground">Criticality score</span>
+              <span className="text-xs text-muted-foreground">Care risk score</span>
             </div>
           </div>
         </GlassCard>
       </motion.div>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <GlassCard className="p-5">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-[var(--status-critical)]/10 text-[var(--status-critical)]">
-            <HeartPulse className="size-4.5" />
+      <GlassCard className="p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FcIdea className="size-4" />
+            <h3 className="text-sm font-semibold">Actionable Insight From AI</h3>
           </div>
-          <AnimatedCounter value={data.criticalPatients + data.severePatients} className="mt-3 block text-2xl font-semibold tabular-nums" />
-          <p className="mt-1 text-xs text-muted-foreground">Critical + severe patients ({data.activePatients} active total)</p>
-        </GlassCard>
+        </div>
+
+        {aiLoading ? (
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-2/3" />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Skeleton className="h-20 rounded-lg" />
+              <Skeleton className="h-20 rounded-lg" />
+            </div>
+          </div>
+        ) : aiError || !aiSuggestions ? (
+          <p className="text-sm text-muted-foreground">AI suggestions are unavailable right now.</p>
+        ) : (
+          <>
+            <p className="mb-4 text-sm text-muted-foreground">{aiSuggestions.summary}</p>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {aiSuggestions.suggestions.map((s, i) => (
+                <div key={i} className="rounded-lg border border-border p-3">
+                  <div className="mb-1 flex items-start justify-between gap-2">
+                    <p className="text-sm font-medium">{s.title}</p>
+                    <StatusBadge showIcon={false} tone={PRIORITY_TONE[s.priority]} label={s.priority} className="shrink-0" />
+                  </div>
+                  <p className="text-xs text-muted-foreground">{s.detail}</p>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        <div className="mt-4 flex justify-end">
+          <Button asChild size="sm" className="bg-sky-600 text-white hover:bg-sky-700">
+            <Link href={`/ai-insights?hospitalId=${data.id}&hospitalName=${encodeURIComponent(data.name)}`}>
+              More <ArrowUpRight className="size-3.5" />
+            </Link>
+          </Button>
+        </div>
+      </GlassCard>
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <GlassCard className="p-5">
           <div className="flex size-9 items-center justify-center rounded-lg bg-[var(--brand-primary)]/10 text-[var(--brand-primary)]">
             <BedDouble className="size-4.5" />
           </div>
-          <AnimatedCounter value={data.availableBeds} className="mt-3 block text-2xl font-semibold tabular-nums" />
-          <p className="mt-1 text-xs text-muted-foreground">Beds available of {data.beds} ({data.occupancyRate.toFixed(0)}% occupied)</p>
-        </GlassCard>
-        <GlassCard className="p-5">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-[var(--status-serious)]/10 text-[var(--status-serious)]">
-            <Siren className="size-4.5" />
-          </div>
-          <AnimatedCounter value={data.icuAvailable} className="mt-3 block text-2xl font-semibold tabular-nums" />
-          <p className="mt-1 text-xs text-muted-foreground">ICU beds free of {data.icuBeds} · {data.ventilators - data.ventilatorsInUse}/{data.ventilators} ventilators free</p>
+          <AnimatedCounter value={data.beds} className="mt-3 block text-2xl font-semibold tabular-nums" />
+          <p className="mt-1 text-xs text-muted-foreground">Beds &middot; {data.admissionsPerBed.toFixed(0)} admissions/bed</p>
         </GlassCard>
         <GlassCard className="p-5">
           <div className="flex size-9 items-center justify-center rounded-lg bg-[var(--status-warning)]/10 text-[var(--status-warning)]">
-            <Clock className="size-4.5" />
+            <Stethoscope className="size-4.5" />
           </div>
-          <AnimatedCounter value={data.waitingTimeMin} suffix=" min" className="mt-3 block text-2xl font-semibold tabular-nums" />
-          <p className="mt-1 text-xs text-muted-foreground">Avg. waiting time · {data.doctorsAvailable}/{data.doctorsTotal} doctors on duty</p>
+          <AnimatedCounter value={data.admissionTotal} className="mt-3 block text-2xl font-semibold tabular-nums" />
+          <p className="mt-1 text-xs text-muted-foreground">Admissions &middot; M {data.admissionMale.toLocaleString()} / F {data.admissionFemale.toLocaleString()}</p>
+        </GlassCard>
+        <GlassCard className="p-5">
+          <div className="flex size-9 items-center justify-center rounded-lg bg-[var(--status-critical)]/10 text-[var(--status-critical)]">
+            <Siren className="size-4.5" />
+          </div>
+          <AnimatedCounter value={data.deathTotal} className="mt-3 block text-2xl font-semibold tabular-nums" />
+          <p className="mt-1 text-xs text-muted-foreground">Deaths &middot; {data.caseFatalityRate.toFixed(1)}% case fatality rate</p>
+        </GlassCard>
+        <GlassCard className="p-5">
+          <div className="flex size-9 items-center justify-center rounded-lg bg-[var(--status-good)]/10 text-[var(--status-good)]">
+            <Activity className="size-4.5" />
+          </div>
+          <AnimatedCounter value={data.outdoorVisitTotal} className="mt-3 block text-2xl font-semibold tabular-nums" />
+          <p className="mt-1 text-xs text-muted-foreground">Outdoor visits &middot; incl. {data.outdoorVisitChild.toLocaleString()} child</p>
         </GlassCard>
       </div>
 
@@ -155,76 +194,112 @@ export default function HospitalDetailPage() {
           <h3 className="mb-4 text-sm font-semibold">Why This Score</h3>
           <div className="space-y-4">
             <ProgressMeter
-              label="Patient severity pressure"
-              value={data.scoreBreakdown.patientSeverityPressure}
-              tone={pressureTone(data.scoreBreakdown.patientSeverityPressure, 60, 35)}
+              label="Fatality pressure"
+              value={data.scoreBreakdown.fatalityPressure}
+              tone={pressureTone(data.scoreBreakdown.fatalityPressure, 60, 30)}
             />
             <ProgressMeter
-              label="Bed occupancy"
-              value={data.scoreBreakdown.occupancyPressure}
-              tone={pressureTone(data.scoreBreakdown.occupancyPressure, 90, 75)}
-            />
-            <ProgressMeter label="ICU pressure" value={data.scoreBreakdown.icuPressure} tone={pressureTone(data.scoreBreakdown.icuPressure, 85, 60)} />
-            <ProgressMeter
-              label="Ventilator pressure"
-              value={data.scoreBreakdown.ventilatorPressure}
-              tone={pressureTone(data.scoreBreakdown.ventilatorPressure, 85, 60)}
+              label="Overcrowding pressure"
+              value={data.scoreBreakdown.overcrowdingPressure}
+              tone={pressureTone(data.scoreBreakdown.overcrowdingPressure, 70, 40)}
             />
             <ProgressMeter
-              label="Waiting time pressure"
-              value={data.scoreBreakdown.waitingPressure}
-              tone={pressureTone(data.scoreBreakdown.waitingPressure, 70, 40)}
+              label="Outdoor visit burden"
+              value={data.scoreBreakdown.outdoorBurdenPressure}
+              tone={pressureTone(data.scoreBreakdown.outdoorBurdenPressure, 55, 30)}
             />
           </div>
         </GlassCard>
 
         <GlassCard className="p-5">
-          <h3 className="mb-4 text-sm font-semibold">Active Patients by Severity</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-lg border border-border p-3">
-              <p className="text-xs text-muted-foreground">Critical</p>
-              <p className="mt-1 text-xl font-semibold tabular-nums text-[var(--status-critical)]">{data.severityBreakdown.critical}</p>
-            </div>
-            <div className="rounded-lg border border-border p-3">
-              <p className="text-xs text-muted-foreground">Severe</p>
-              <p className="mt-1 text-xl font-semibold tabular-nums text-[var(--status-serious)]">{data.severityBreakdown.severe}</p>
-            </div>
-            <div className="rounded-lg border border-border p-3">
-              <p className="text-xs text-muted-foreground">Moderate</p>
-              <p className="mt-1 text-xl font-semibold tabular-nums text-[var(--status-warning)]">{data.severityBreakdown.moderate}</p>
-            </div>
-            <div className="rounded-lg border border-border p-3">
-              <p className="text-xs text-muted-foreground">Mild</p>
-              <p className="mt-1 text-xl font-semibold tabular-nums text-[var(--status-good)]">{data.severityBreakdown.mild}</p>
-            </div>
-          </div>
+          <h3 className="mb-4 text-sm font-semibold">{data.reportYear} Activity by Gender</h3>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Metric</TableHead>
+                <TableHead className="text-right">Male</TableHead>
+                <TableHead className="text-right">Female</TableHead>
+                <TableHead className="text-right">Child</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow>
+                <TableCell className="font-medium">Admissions</TableCell>
+                <TableCell className="text-right tabular-nums">{data.admissionMale.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums">{data.admissionFemale.toLocaleString()}</TableCell>
+                <TableCell className="text-right text-muted-foreground">&mdash;</TableCell>
+                <TableCell className="text-right font-medium tabular-nums">{data.admissionTotal.toLocaleString()}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="font-medium">Deaths</TableCell>
+                <TableCell className="text-right tabular-nums">{data.deathMale.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums">{data.deathFemale.toLocaleString()}</TableCell>
+                <TableCell className="text-right text-muted-foreground">&mdash;</TableCell>
+                <TableCell className="text-right font-medium tabular-nums text-[var(--status-critical)]">{data.deathTotal.toLocaleString()}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="font-medium">Outdoor Visits</TableCell>
+                <TableCell className="text-right tabular-nums">{data.outdoorVisitMale.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums">{data.outdoorVisitFemale.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums">{data.outdoorVisitChild.toLocaleString()}</TableCell>
+                <TableCell className="text-right font-medium tabular-nums">{data.outdoorVisitTotal.toLocaleString()}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </GlassCard>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <GlassCard className="p-5">
-          <h3 className="mb-4 text-sm font-semibold">Recent District Incidents</h3>
-          {incidentEvents.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No recent emergency incidents reported in {data.districtName}.</p>
-          ) : (
-            <Timeline events={incidentEvents} />
-          )}
+          <div className="mb-4 flex items-center gap-2">
+            <Trophy className="size-4 text-muted-foreground" />
+            <h3 className="text-sm font-semibold">Ranking</h3>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-xs text-muted-foreground">National</p>
+              <p className="mt-1 text-lg font-semibold tabular-nums">#{data.nationalRank} <span className="text-xs font-normal text-muted-foreground">of {data.totalHospitalsNational}</span></p>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-xs text-muted-foreground">{data.divisionName} Division</p>
+              <p className="mt-1 text-lg font-semibold tabular-nums">#{data.divisionRank} <span className="text-xs font-normal text-muted-foreground">of {data.totalHospitalsInDivision}</span></p>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-xs text-muted-foreground">{data.districtName} District</p>
+              <p className="mt-1 text-lg font-semibold tabular-nums">#{data.districtRank} <span className="text-xs font-normal text-muted-foreground">of {data.totalHospitalsInDistrict}</span></p>
+            </div>
+          </div>
         </GlassCard>
 
-        <div>
-          <h3 className="mb-3 text-sm font-semibold">Recent District Alerts</h3>
-          {alertItems.length === 0 ? (
-            <GlassCard className="p-5">
-              <p className="text-sm text-muted-foreground">No recent alerts for {data.districtName}.</p>
-            </GlassCard>
+        <GlassCard className="p-5">
+          <h3 className="mb-4 text-sm font-semibold">Other Hospitals in {data.districtName}</h3>
+          {data.districtPeers.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No other reporting hospitals in this district.</p>
           ) : (
             <div className="space-y-2">
-              {alertItems.map((a, i) => (
-                <AlertCard key={a.id} alert={a} index={i} />
-              ))}
+              {data.districtPeers.map((peer) => {
+                const peerTone = scoreTone(peer.criticalityScore);
+                return (
+                  <Link
+                    key={peer.id}
+                    href={`/actiondashboard/${peer.id}`}
+                    className={`group flex items-center justify-between gap-3 rounded-lg border border-l-4 border-border ${SCORE_BORDER[peerTone]} bg-card/40 px-3 py-2 transition-colors hover:bg-muted/60`}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{peer.name}</p>
+                      <p className="text-xs text-muted-foreground">{peer.upazilaName}</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className="text-sm font-semibold tabular-nums">{peer.criticalityScore.toFixed(0)}</span>
+                      <ChevronRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
           )}
-        </div>
+        </GlassCard>
       </div>
     </div>
   );

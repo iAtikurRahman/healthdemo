@@ -2,14 +2,22 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { AlertTriangle, BedDouble, HeartPulse, ChevronRight } from "lucide-react";
+import { AlertTriangle, Award, Stethoscope, HeartPulse, ChevronRight } from "lucide-react";
 import { GlassCard } from "@/components/shared/glass-card";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { scoreTone, scoreLabel, SCORE_BORDER } from "./score-utils";
 import type { CriticalHospital } from "@/types";
 
-export function HotspotList({ hospitals, isLoading }: { hospitals?: CriticalHospital[]; isLoading?: boolean }) {
+export function HotspotList({
+  hospitals,
+  view = "negative",
+  isLoading,
+}: {
+  hospitals?: CriticalHospital[];
+  view?: "negative" | "positive";
+  isLoading?: boolean;
+}) {
   if (isLoading || !hospitals) {
     return (
       <GlassCard className="p-5">
@@ -23,17 +31,22 @@ export function HotspotList({ hospitals, isLoading }: { hospitals?: CriticalHosp
     );
   }
 
-  const worst = hospitals.slice(0, 10);
+  const top = hospitals.slice(0, 10);
+  const isPositive = view === "positive";
 
   return (
     <GlassCard className="p-5">
       <div className="mb-4 flex items-center gap-2">
-        <AlertTriangle className="size-4 text-[var(--status-critical)]" />
-        <h3 className="text-sm font-semibold">Top Hotspots — Worst Emergency Situations</h3>
+        {isPositive ? (
+          <Award className="size-4 text-[var(--status-good)]" />
+        ) : (
+          <AlertTriangle className="size-4 text-[var(--status-critical)]" />
+        )}
+        <h3 className="text-sm font-semibold">{isPositive ? "Top Performers — Best Practices" : "Top Hotspots — Worst Emergency Situations"}</h3>
         <span className="text-xs text-muted-foreground">Click a hospital for full details</span>
       </div>
       <div className="space-y-2">
-        {worst.map((h, i) => {
+        {top.map((h, i) => {
           const tone = scoreTone(h.criticalityScore);
           return (
             <motion.div
@@ -52,9 +65,8 @@ export function HotspotList({ hospitals, isLoading }: { hospitals?: CriticalHosp
                       {i + 1}
                     </span>
                     <p className="truncate text-sm font-medium">{h.name}</p>
-                    {h.hasEmergency && <StatusBadge tone="critical" label="Emergency" showIcon={false} className="shrink-0" />}
                   </div>
-                  <p className="mt-0.5 pl-7 text-xs text-muted-foreground">{h.districtName}, {h.divisionName}</p>
+                  <p className="mt-0.5 pl-7 text-xs text-muted-foreground">{h.upazilaName}, {h.districtName}, {h.divisionName}</p>
                   {h.concerns.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1.5 pl-7">
                       {h.concerns.slice(0, 3).map((c) => (
@@ -69,13 +81,13 @@ export function HotspotList({ hospitals, isLoading }: { hospitals?: CriticalHosp
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-4 pl-7 sm:pl-0">
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground" title="Critical + severe patients currently admitted">
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground" title="Case fatality rate">
                     <HeartPulse className="size-3.5 text-[var(--status-critical)]" />
-                    <span className="font-medium tabular-nums text-foreground">{h.criticalPatients + h.severePatients}</span>
+                    <span className="font-medium tabular-nums text-foreground">{h.caseFatalityRate.toFixed(1)}%</span>
                   </div>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground" title="Bed occupancy">
-                    <BedDouble className="size-3.5" />
-                    <span className="font-medium tabular-nums text-foreground">{h.occupancyRate.toFixed(0)}%</span>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground" title="Admissions per bed">
+                    <Stethoscope className="size-3.5" />
+                    <span className="font-medium tabular-nums text-foreground">{h.admissionsPerBed.toFixed(0)}/bed</span>
                   </div>
                   <StatusBadge tone={tone} label={scoreLabel(h.criticalityScore)} showIcon={false} />
                   <span className="w-9 text-right text-sm font-semibold tabular-nums">{h.criticalityScore.toFixed(0)}</span>

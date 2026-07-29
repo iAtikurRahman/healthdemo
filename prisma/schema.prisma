@@ -74,6 +74,60 @@ model Hospital {
   @@map("hospitals")
 }
 
+// Pre-existing real tables (not managed/seeded by this app) — column shapes
+// copied verbatim from `prisma db pull` against the live `helth_demo` database.
+// No `@relation` fields: the DB has no FK constraints between these id columns,
+// so joins are done in application code (services/hospital-statistics.service.ts).
+model AreaInfo {
+  id           Int       @id @default(autoincrement())
+  name         String?   @db.VarChar(30)
+  nameBn       String?   @map("name_bn") @db.VarChar(150)
+  divBbsCode   String?   @map("div_bbs_code") @db.VarChar(10)
+  zilaBbsCode  String?   @map("zila_bbs_code") @db.VarChar(10)
+  thanaBbsCode String?   @map("thana_bbs_code") @db.VarChar(10)
+  areaType     Int?      @map("area_type") @db.TinyInt // 1 = Division, 2 = District, 4 = Upazila
+  parentId     Int?      @map("parent_id")
+  status       Int       @default(1) @db.TinyInt
+  created_by   Int?
+  created_at   DateTime? @db.DateTime(0)
+  updated_by   Int?
+  updated_at   DateTime  @default(now()) @db.Timestamp(0)
+
+  @@index([areaType], map: "area_type")
+  @@index([parentId], map: "parent_id")
+  @@index([status], map: "status")
+  @@map("area_info")
+}
+
+model HospitalStatistic {
+  id                   Int    @id @default(autoincrement())
+  reportYear           Int    @map("report_year") @db.SmallInt
+  hospitalId           Int    @map("hospital_id")
+  hospitalName         String @map("hospital_name") @db.VarChar(255)
+  divisionId           Int?   @map("division_id")
+  districtId           Int?   @map("district_id")
+  district             String @db.VarChar(100)
+  upazila              String @db.VarChar(100)
+  upazilaId            Int?   @map("upazila_id")
+  no_of_beds           Int?   @default(0)
+  admission_male       Int?   @default(0)
+  admission_female     Int?   @default(0)
+  admission_total      Int?   @default(0)
+  death_male           Int?   @default(0)
+  death_female         Int?   @default(0)
+  death_total          Int?   @default(0)
+  outdoor_visit_male   Int?   @default(0)
+  outdoor_visit_female Int?   @default(0)
+  outdoor_visit_child  Int?   @default(0)
+  outdoor_visit_total  Int?   @default(0)
+
+  @@index([district], map: "idx_district")
+  @@index([hospitalId], map: "idx_hospital")
+  @@index([upazila], map: "idx_upazila")
+  @@index([reportYear], map: "idx_year")
+  @@map("hospital_statistics")
+}
+
 model Doctor {
   id              String   @id @default(cuid())
   name            String

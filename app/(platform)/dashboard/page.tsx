@@ -43,7 +43,7 @@ export default function DashboardPage() {
     <div className="mx-auto max-w-[1600px] space-y-6">
       <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
         <h1 className="text-xl font-semibold tracking-tight">Executive Overview</h1>
-        <p className="text-sm text-muted-foreground">Real-time national health indicators &mdash; synthetic demo data.</p>
+        <p className="text-sm text-muted-foreground">National health indicators from the hospital_statistics report table.</p>
       </motion.div>
 
       <KpiGrid kpis={data?.kpis} isLoading={isLoading} />

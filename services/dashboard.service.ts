@@ -12,136 +12,115 @@ function dailyDelta(key: string, min = -6, max = 6) {
   return randFloat(dailySeed(key), min, max, 1);
 }
 
+// Executive Overview KPIs, sourced from the real `hospital_statistics` report table
+// (aggregated across every reporting hospital) rather than the app's synthetic models.
 export async function getDashboardKpis(): Promise<KpiDatum[]> {
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-
-  const [
-    populationAgg,
-    todaysPatients,
-    hospitalAgg,
-    criticalAlerts,
-    medicineAgg,
-    emergencyCases,
-    healthIndexAgg,
-    riskAgg,
-  ] = await Promise.all([
-    prisma.district.aggregate({ _sum: { population: true } }),
-    prisma.patient.count({ where: { admissionDate: { gte: startOfToday } } }),
-    prisma.hospital.aggregate({ _avg: { occupancyRate: true }, _sum: { availableBeds: true } }),
-    prisma.alert.count({ where: { priority: { in: ["Critical", "High"] }, createdAt: { gte: new Date(Date.now() - 7 * 86400000) } } }),
-    prisma.medicineStock.aggregate({ _sum: { stockLevel: true, capacity: true } }),
-    prisma.patient.count({ where: { severity: "Critical", status: { in: ["Admitted", "Under Treatment", "Critical"] } } }),
-    prisma.district.aggregate({ _avg: { healthIndex: true } }),
-    prisma.diseaseRecord.aggregate({
-      where: { date: { gte: new Date(Date.now() - 7 * 86400000) } },
-      _avg: { riskScore: true },
+  const [agg, yearAgg, districtRows] = await Promise.all([
+    prisma.hospitalStatistic.aggregate({
+      _sum: {
+        no_of_beds: true,
+        admission_total: true,
+        death_total: true,
+        outdoor_visit_total: true,
+      },
+      _count: { _all: true },
     }),
+    prisma.hospitalStatistic.aggregate({ _max: { reportYear: true } }),
+    prisma.hospitalStatistic.findMany({ select: { districtId: true }, distinct: ["districtId"] }),
   ]);
 
-  const population = populationAgg._sum.population ?? 0;
-  const occupancy = Math.round((hospitalAgg._avg.occupancyRate ?? 0) * 10) / 10;
-  const availableBeds = hospitalAgg._sum.availableBeds ?? 0;
-  const medicineStockPct = medicineAgg._sum.capacity
-    ? Math.round(((medicineAgg._sum.stockLevel ?? 0) / medicineAgg._sum.capacity) * 1000) / 10
-    : 0;
-  const healthIndex = Math.round((healthIndexAgg._avg.healthIndex ?? 0) * 10) / 10;
-  const aiRiskScore = Math.round(riskAgg._avg.riskScore ?? 0);
+  const reportingHospitals = agg._count._all;
+  const totalBeds = agg._sum.no_of_beds ?? 0;
+  const totalAdmissions = agg._sum.admission_total ?? 0;
+  const totalDeaths = agg._sum.death_total ?? 0;
+  const totalOutdoorVisits = agg._sum.outdoor_visit_total ?? 0;
+  const reportYear = yearAgg._max.reportYear ?? 0;
+  const districtsCovered = districtRows.filter((d) => d.districtId != null).length;
+  const avgBedsPerHospital = reportingHospitals ? Math.round((totalBeds / reportingHospitals) * 10) / 10 : 0;
+  const caseFatalityRate = totalAdmissions ? Math.round((totalDeaths / totalAdmissions) * 1000) / 10 : 0;
 
   const kpis: KpiDatum[] = [
     {
-      id: "population",
-      label: "Population Monitored",
-      value: population,
-      formattedValue: formatCompact(population),
-      deltaPercent: dailyDelta("population", 0.1, 0.4),
+      id: "reporting-hospitals",
+      label: "Reporting Hospitals",
+      value: reportingHospitals,
+      formattedValue: formatCompact(reportingHospitals),
+      deltaPercent: dailyDelta("reporting-hospitals", 0.1, 0.4),
       trend: "up",
       sentiment: "good",
-      icon: "Users",
+      icon: "Building2",
     },
     {
-      id: "todays-patients",
-      label: "Today's Patients",
-      value: todaysPatients,
-      formattedValue: formatCompact(todaysPatients),
-      deltaPercent: dailyDelta("todays-patients"),
-      trend: dailyDelta("todays-patients") >= 0 ? "up" : "down",
-      sentiment: "warning",
-      icon: "Stethoscope",
-    },
-    {
-      id: "hospital-occupancy",
-      label: "Hospital Occupancy",
-      value: occupancy,
-      formattedValue: `${occupancy}`,
-      unit: "%",
-      deltaPercent: dailyDelta("occupancy"),
-      trend: dailyDelta("occupancy") >= 0 ? "up" : "down",
-      sentiment: occupancy > 85 ? "critical" : occupancy > 70 ? "warning" : "good",
+      id: "total-beds",
+      label: "Total Hospital Beds",
+      value: totalBeds,
+      formattedValue: formatCompact(totalBeds),
+      deltaPercent: dailyDelta("total-beds"),
+      trend: dailyDelta("total-beds") >= 0 ? "up" : "down",
+      sentiment: "good",
       icon: "BedDouble",
     },
     {
-      id: "disease-alerts",
-      label: "Disease Alerts",
-      value: criticalAlerts,
-      formattedValue: `${criticalAlerts}`,
-      deltaPercent: dailyDelta("disease-alerts"),
-      trend: dailyDelta("disease-alerts") >= 0 ? "up" : "down",
-      sentiment: criticalAlerts > 15 ? "critical" : criticalAlerts > 8 ? "warning" : "good",
-      icon: "Siren",
-    },
-    {
-      id: "available-beds",
-      label: "Available Beds",
-      value: availableBeds,
-      formattedValue: formatCompact(availableBeds),
-      deltaPercent: dailyDelta("available-beds"),
-      trend: dailyDelta("available-beds") >= 0 ? "up" : "down",
+      id: "avg-beds-per-hospital",
+      label: "Avg Beds / Hospital",
+      value: avgBedsPerHospital,
+      formattedValue: `${avgBedsPerHospital}`,
+      deltaPercent: dailyDelta("avg-beds-per-hospital"),
+      trend: dailyDelta("avg-beds-per-hospital") >= 0 ? "up" : "down",
       sentiment: "good",
       icon: "BedSingle",
     },
     {
-      id: "medicine-stock",
-      label: "Medicine Stock Health",
-      value: medicineStockPct,
-      formattedValue: `${medicineStockPct}`,
-      unit: "%",
-      deltaPercent: dailyDelta("medicine-stock"),
-      trend: dailyDelta("medicine-stock") >= 0 ? "up" : "down",
-      sentiment: medicineStockPct < 30 ? "critical" : medicineStockPct < 50 ? "warning" : "good",
-      icon: "Pill",
+      id: "total-admissions",
+      label: `Total Admissions (${reportYear})`,
+      value: totalAdmissions,
+      formattedValue: formatCompact(totalAdmissions),
+      deltaPercent: dailyDelta("total-admissions"),
+      trend: dailyDelta("total-admissions") >= 0 ? "up" : "down",
+      sentiment: "warning",
+      icon: "Stethoscope",
     },
     {
-      id: "emergency-cases",
-      label: "Emergency Cases",
-      value: emergencyCases,
-      formattedValue: `${emergencyCases}`,
-      deltaPercent: dailyDelta("emergency-cases"),
-      trend: dailyDelta("emergency-cases") >= 0 ? "up" : "down",
-      sentiment: emergencyCases > 400 ? "critical" : emergencyCases > 200 ? "warning" : "good",
+      id: "total-deaths",
+      label: `Total Deaths (${reportYear})`,
+      value: totalDeaths,
+      formattedValue: formatCompact(totalDeaths),
+      deltaPercent: dailyDelta("total-deaths"),
+      trend: dailyDelta("total-deaths") >= 0 ? "up" : "down",
+      sentiment: "critical",
+      icon: "Siren",
+    },
+    {
+      id: "case-fatality-rate",
+      label: "Case Fatality Rate",
+      value: caseFatalityRate,
+      formattedValue: `${caseFatalityRate}`,
+      unit: "%",
+      deltaPercent: dailyDelta("case-fatality-rate"),
+      trend: dailyDelta("case-fatality-rate") >= 0 ? "up" : "down",
+      sentiment: caseFatalityRate > 3 ? "critical" : caseFatalityRate > 1.5 ? "warning" : "good",
       icon: "HeartPulse",
     },
     {
-      id: "health-index",
-      label: "National Health Index",
-      value: healthIndex,
-      formattedValue: `${healthIndex}`,
-      unit: "/100",
-      deltaPercent: dailyDelta("health-index", -2, 2),
-      trend: dailyDelta("health-index", -2, 2) >= 0 ? "up" : "down",
-      sentiment: healthIndex > 70 ? "good" : healthIndex > 55 ? "warning" : "critical",
+      id: "total-outdoor-visits",
+      label: `Outdoor Visits (${reportYear})`,
+      value: totalOutdoorVisits,
+      formattedValue: formatCompact(totalOutdoorVisits),
+      deltaPercent: dailyDelta("total-outdoor-visits"),
+      trend: dailyDelta("total-outdoor-visits") >= 0 ? "up" : "down",
+      sentiment: "good",
       icon: "Activity",
     },
     {
-      id: "ai-risk-score",
-      label: "AI Risk Score",
-      value: aiRiskScore,
-      formattedValue: `${aiRiskScore}`,
-      unit: "/100",
-      deltaPercent: dailyDelta("ai-risk-score"),
-      trend: dailyDelta("ai-risk-score") >= 0 ? "up" : "down",
-      sentiment: aiRiskScore > 65 ? "critical" : aiRiskScore > 40 ? "warning" : "good",
-      icon: "BrainCircuit",
+      id: "districts-covered",
+      label: "Districts Covered",
+      value: districtsCovered,
+      formattedValue: `${districtsCovered}`,
+      unit: "/64",
+      deltaPercent: dailyDelta("districts-covered", 0, 0.2),
+      trend: "up",
+      sentiment: districtsCovered >= 64 ? "good" : districtsCovered >= 40 ? "warning" : "critical",
+      icon: "MapPinned",
     },
   ];
 

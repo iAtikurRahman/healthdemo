@@ -1,9 +1,13 @@
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { getGeminiClient } from "@/lib/gemini";
 import { DISTRICTS } from "@/mock-data/geo";
 import { getDashboardKpis } from "@/services/dashboard.service";
 import { getDiseaseAffectedDistricts, getDiseaseTrend } from "@/services/diseases.service";
 import { getMedicineStockAlerts, getResourceOverview } from "@/services/resources.service";
 import { getAlerts } from "@/services/alerts.service";
+import { getCriticalHospitalDetail, getCriticalHospitals } from "@/services/hospitals.service";
+import { getNationalGisOverview } from "@/services/hospital-statistics.service";
 import { createRng, randFloat } from "@/utils/random";
 import type { ChatMessage } from "@/types";
 
@@ -15,19 +19,58 @@ function findMentionedDistricts(message: string): string[] {
   return names.filter((n) => lower.includes(n.toLowerCase()));
 }
 
+// Whole-word match -- plain .includes() falsely matches "tb" inside "football",
+// "icu" inside "particular", etc., which misroutes real questions into the
+// wrong (now genuinely AI-answered) handler.
+function hasWord(text: string, word: string): boolean {
+  return new RegExp(`\\b${word}\\b`, "i").test(text);
+}
+
+const InsightSchema = z.object({
+  narrative: z
+    .string()
+    .describe("2-4 short paragraphs of Markdown analysis. Start with a '## Title' heading and use **bold** for key figures. Cite only numbers present in the provided data."),
+  recommendations: z
+    .array(z.string().describe("A single concise, actionable recommendation"))
+    .min(2)
+    .max(5),
+});
+
+// Turns already-queried real platform data into a genuine Claude-generated
+// narrative + recommendations, grounded strictly in that data (no invented
+// facts). Charts/tables stay deterministically built from the same data by
+// each caller -- only the prose and recommendation list are LLM-generated.
+async function generateInsight(topic: string, dataContext: unknown): Promise<{ narrative: string; recommendations: string[] }> {
+  const client = getGeminiClient();
+  const response = await client.models.generateContent({
+    model: "gemini-flash-latest",
+    contents: `Topic: ${topic}\n\nData (JSON):\n${JSON.stringify(dataContext, null, 2)}`,
+    config: {
+      systemInstruction:
+        "You are the AI Executive Assistant embedded in a national public-health analytics dashboard. You are given real data already queried from the platform's database for the requested topic. Write for a health-ministry executive: concise, decisive, and action-oriented. Cite specific figures from the data -- never invent numbers, districts, hospitals, or events not present in it. If the provided data doesn't cover what's being asked, say so honestly instead of guessing.",
+      responseMimeType: "application/json",
+      responseJsonSchema: z.toJSONSchema(InsightSchema),
+    },
+  });
+
+  if (!response.text) {
+    throw new Error("Gemini did not return a response");
+  }
+  return InsightSchema.parse(JSON.parse(response.text));
+}
+
 async function handleDengueRisk(): Promise<AiResponse> {
   const affected = await getDiseaseAffectedDistricts("Dengue");
   const top = affected.slice(0, 8);
   const avgRisk = Math.round(top.reduce((s, d) => s + d.riskScore, 0) / Math.max(1, top.length));
 
-  const content = `## Dengue Risk Assessment — National
-
-Based on the last 14 days of surveillance data, **${top[0]?.district ?? "N/A"}** shows the highest Dengue risk nationally, with **${top[0]?.cases ?? 0} reported cases** and an AI risk score of **${top[0]?.riskScore ?? 0}/100**.
-
-${top.length} districts currently exceed the elevated-risk threshold. The average risk score across the top affected districts is **${avgRisk}/100**, indicating a ${avgRisk > 60 ? "critical" : avgRisk > 35 ? "moderate-to-high" : "manageable"} national situation requiring ${avgRisk > 60 ? "immediate" : "continued"} vector-control intervention.`;
+  const insight = await generateInsight("Dengue risk assessment across the top affected districts (last 14 days)", {
+    topAffectedDistricts: top,
+    averageRiskScore: avgRisk,
+  });
 
   return {
-    content,
+    content: insight.narrative,
     charts: [
       {
         type: "bar",
@@ -41,12 +84,7 @@ ${top.length} districts currently exceed the elevated-risk threshold. The averag
       columns: ["District", "Cases", "Deaths", "Risk Score", "Population"],
       rows: top.map((d) => [d.district, d.cases, d.deaths, d.riskScore, d.population.toLocaleString()]),
     },
-    recommendations: [
-      `Deploy additional vector-control teams to ${top[0]?.district ?? "the highest-risk district"} within 72 hours.`,
-      "Launch community awareness campaigns in the top 5 affected districts.",
-      "Pre-position IV fluids and platelet supplies at district hospitals in high-risk zones.",
-      "Increase surveillance sampling frequency from weekly to twice-weekly in Severe/High risk districts.",
-    ],
+    recommendations: insight.recommendations,
     riskScore: avgRisk,
   };
 }
@@ -65,14 +103,16 @@ async function handleIcuDemand(): Promise<AiResponse> {
   }
   const peak = Math.max(...forecast.map((f) => f["Projected Demand %"]));
 
-  const content = `## ICU Demand Forecast — Next 7 Days
-
-Current national ICU occupancy stands at **${usageRate}%** (${used.toLocaleString()} of ${overview.icu.total.toLocaleString()} beds in use). The predictive model projects occupancy to ${peak > usageRate ? "rise" : "hold steady"} toward **${peak}%** over the coming week under current admission trends.
-
-${peak > 85 ? "This exceeds the safe capacity buffer — surge planning is recommended." : peak > 70 ? "This approaches the caution threshold; monitor closely." : "Capacity remains within a comfortable operating margin."}`;
+  const insight = await generateInsight("7-day national ICU demand forecast", {
+    currentOccupancyPercent: usageRate,
+    icuBedsInUse: used,
+    icuBedsTotal: overview.icu.total,
+    sevenDayForecast: forecast,
+    projectedPeakPercent: peak,
+  });
 
   return {
-    content,
+    content: insight.narrative,
     charts: [
       {
         type: "line",
@@ -81,11 +121,7 @@ ${peak > 85 ? "This exceeds the safe capacity buffer — surge planning is recom
         seriesKeys: ["Projected Demand %"],
       },
     ],
-    recommendations: [
-      peak > 85 ? "Activate ICU surge protocol and reassign ventilators from lower-demand divisions." : "Maintain current ICU staffing rotation.",
-      "Prioritize ICU discharge planning for stabilized patients to free capacity.",
-      "Coordinate with private hospitals for overflow ICU arrangements in high-demand divisions.",
-    ],
+    recommendations: insight.recommendations,
     riskScore: Math.round(peak),
   };
 }
@@ -94,14 +130,14 @@ async function handleMedicineShortages(): Promise<AiResponse> {
   const alerts = await getMedicineStockAlerts(10);
   const criticalCount = alerts.filter((a) => a.status === "Critical").length;
 
-  const content = `## Medicine Shortage Prediction
-
-The inventory model has identified **${alerts.length} facilities** with medicine stock levels below the safe reorder threshold, including **${criticalCount} in a Critical state** requiring resupply within 72 hours.
-
-The most urgent shortage is **${alerts[0]?.name ?? "N/A"}** at **${alerts[0]?.hospitalName ?? "N/A"}** (${alerts[0]?.districtName ?? ""}), currently at ${alerts[0] ? Math.round((alerts[0].stockLevel / alerts[0].capacity) * 100) : 0}% of capacity.`;
+  const insight = await generateInsight("Medicine shortage prediction across facilities below safe reorder threshold", {
+    facilitiesBelowReorderThreshold: alerts.length,
+    criticalCount,
+    facilities: alerts,
+  });
 
   return {
-    content,
+    content: insight.narrative,
     charts: [
       {
         type: "bar",
@@ -115,11 +151,7 @@ The most urgent shortage is **${alerts[0]?.name ?? "N/A"}** at **${alerts[0]?.ho
       columns: ["Medicine", "Hospital", "District", "Stock", "Capacity", "Status"],
       rows: alerts.map((a) => [a.name, a.hospitalName, a.districtName, `${a.stockLevel} ${a.unit}`, `${a.capacity} ${a.unit}`, a.status]),
     },
-    recommendations: [
-      "Trigger emergency procurement for all Critical-status medicines within 48 hours.",
-      "Redistribute surplus stock from Overstocked facilities to nearby Critical/Low facilities.",
-      "Adjust national reorder thresholds upward for high-consumption categories (Antibiotics, IV Fluids).",
-    ],
+    recommendations: insight.recommendations,
     riskScore: Math.min(100, Math.round((criticalCount / Math.max(1, alerts.length)) * 100)),
   };
 }
@@ -148,20 +180,10 @@ async function handleCompareDistricts(message: string): Promise<AiResponse> {
   const a = summarize(districtA);
   const b = summarize(districtB);
 
-  const content = `## District Comparison: ${a.name} vs ${b.name}
-
-| Metric | ${a.name} | ${b.name} |
-|---|---|---|
-| Population | ${a.population.toLocaleString()} | ${b.population.toLocaleString()} |
-| Health Index | ${a.healthIndex}/100 | ${b.healthIndex}/100 |
-| Avg. Hospital Occupancy | ${a.avgOccupancy}% | ${b.avgOccupancy}% |
-| Total Hospital Beds | ${a.beds.toLocaleString()} | ${b.beds.toLocaleString()} |
-| Risk Level | ${a.riskLevel} | ${b.riskLevel} |
-
-${a.healthIndex > b.healthIndex ? a.name : b.name} currently records the stronger overall health index, while ${a.avgOccupancy > b.avgOccupancy ? a.name : b.name} is operating under greater hospital capacity pressure.`;
+  const insight = await generateInsight(`District comparison: ${a.name} vs ${b.name}`, { districtA: a, districtB: b });
 
   return {
-    content,
+    content: insight.narrative,
     charts: [
       {
         type: "bar",
@@ -173,10 +195,7 @@ ${a.healthIndex > b.healthIndex ? a.name : b.name} currently records the stronge
         seriesKeys: [a.name, b.name],
       },
     ],
-    recommendations: [
-      `Share capacity-management best practices from ${a.avgOccupancy < b.avgOccupancy ? a.name : b.name} with the higher-occupancy district.`,
-      "Consider inter-district ambulance rerouting during peak demand periods.",
-    ],
+    recommendations: insight.recommendations,
   };
 }
 
@@ -185,19 +204,16 @@ async function handleExecutiveSummary(): Promise<AiResponse> {
   const critical = kpis.filter((k) => k.sentiment === "critical");
   const good = kpis.filter((k) => k.sentiment === "good");
 
-  const content = `## National Executive Summary
-
-**Overview:** The national health system is monitoring **${kpis.find((k) => k.id === "population")?.formattedValue}** citizens across 64 districts. ${good.length} of ${kpis.length} tracked indicators are within healthy operating range.
-
-**Areas of concern:** ${critical.length > 0 ? critical.map((k) => `${k.label} (${k.formattedValue}${k.unit ?? ""})`).join(", ") : "None — all indicators nominal."}
-
-**Top active alerts:**
-${alerts.slice(0, 5).map((a) => `- **[${a.priority}]** ${a.title}${a.districtName ? ` — ${a.districtName}` : ""}`).join("\n")}
-
-**Outlook:** The AI Risk Score of **${kpis.find((k) => k.id === "ai-risk-score")?.formattedValue}/100** reflects the composite of disease surveillance, hospital capacity, and resource availability signals nationwide.`;
+  const insight = await generateInsight("National executive summary", {
+    kpis,
+    healthyIndicatorCount: good.length,
+    totalIndicators: kpis.length,
+    criticalIndicators: critical,
+    topActiveAlerts: alerts.slice(0, 5),
+  });
 
   return {
-    content,
+    content: insight.narrative,
     charts: [
       {
         type: "bar",
@@ -206,19 +222,78 @@ ${alerts.slice(0, 5).map((a) => `- **[${a.priority}]** ${a.title}${a.districtNam
         seriesKeys: ["Value"],
       },
     ],
-    recommendations: [
-      "Prioritize resource reallocation toward districts flagged Critical this week.",
-      "Schedule a cross-division capacity review for hospitals above 85% occupancy.",
-      "Continue AI-driven surveillance polling at current cadence — no escalation required beyond flagged items.",
-    ],
+    recommendations: insight.recommendations,
     riskScore: Number(kpis.find((k) => k.id === "ai-risk-score")?.value ?? 0),
+  };
+}
+
+// Triggered from the "Details" button on a hospital's Action Dashboard page --
+// carries the hospitalId straight through rather than parsing it out of the
+// chat message, since free-text keyword matching can't reliably extract an ID.
+async function handleHospitalDetails(hospitalId: string): Promise<AiResponse> {
+  const hospital = await getCriticalHospitalDetail(hospitalId);
+  if (!hospital) {
+    return { content: `## Hospital Not Found\n\nNo hospital_statistics record was found for ID **${hospitalId}**.` };
+  }
+
+  const insight = await generateInsight(`Detailed operational analysis of ${hospital.name}`, {
+    hospitalName: hospital.name,
+    location: `${hospital.upazilaName}, ${hospital.districtName}, ${hospital.divisionName}`,
+    reportYear: hospital.reportYear,
+    beds: hospital.beds,
+    admissions: { male: hospital.admissionMale, female: hospital.admissionFemale, total: hospital.admissionTotal },
+    deaths: { male: hospital.deathMale, female: hospital.deathFemale, total: hospital.deathTotal },
+    outdoorVisits: {
+      male: hospital.outdoorVisitMale,
+      female: hospital.outdoorVisitFemale,
+      child: hospital.outdoorVisitChild,
+      total: hospital.outdoorVisitTotal,
+    },
+    caseFatalityRatePercent: hospital.caseFatalityRate,
+    admissionsPerBed: hospital.admissionsPerBed,
+    outdoorVisitsPerBed: hospital.outdoorVisitsPerBed,
+    careRiskScore: hospital.criticalityScore,
+    scoreBreakdown: hospital.scoreBreakdown,
+    concerns: hospital.concerns,
+    nationalRank: `${hospital.nationalRank} of ${hospital.totalHospitalsNational}`,
+    districtRank: `${hospital.districtRank} of ${hospital.totalHospitalsInDistrict}`,
+  });
+
+  return {
+    content: insight.narrative,
+    charts: [
+      {
+        type: "bar",
+        title: `${hospital.name} — Admissions, Deaths & Outdoor Visits`,
+        data: [
+          { label: "Admissions", Male: hospital.admissionMale, Female: hospital.admissionFemale },
+          { label: "Deaths", Male: hospital.deathMale, Female: hospital.deathFemale },
+          { label: "Outdoor Visits", Male: hospital.outdoorVisitMale, Female: hospital.outdoorVisitFemale },
+        ],
+        seriesKeys: ["Male", "Female"],
+      },
+    ],
+    table: {
+      title: "Key Metrics",
+      columns: ["Metric", "Value"],
+      rows: [
+        ["Beds", hospital.beds],
+        ["Total Admissions", hospital.admissionTotal],
+        ["Total Deaths", hospital.deathTotal],
+        ["Case Fatality Rate", `${hospital.caseFatalityRate}%`],
+        ["Admissions / Bed", hospital.admissionsPerBed],
+        ["Care Risk Score", `${hospital.criticalityScore}/100`],
+        ["National Rank", `${hospital.nationalRank} of ${hospital.totalHospitalsNational}`],
+      ],
+    },
+    recommendations: insight.recommendations,
+    riskScore: hospital.criticalityScore,
   };
 }
 
 async function handleGenericQuery(message: string): Promise<AiResponse> {
   const diseaseKeywords = ["covid", "tuberculosis", "tb", "diabetes", "hypertension", "cancer", "maternal", "child"];
-  const lower = message.toLowerCase();
-  const matchedDisease = diseaseKeywords.find((k) => lower.includes(k));
+  const matchedDisease = diseaseKeywords.find((k) => hasWord(message, k));
 
   if (matchedDisease) {
     const diseaseNameMap: Record<string, string> = {
@@ -228,49 +303,57 @@ async function handleGenericQuery(message: string): Promise<AiResponse> {
     const disease = diseaseNameMap[matchedDisease];
     const trend = await getDiseaseTrend(disease, 21);
     const latest = trend[trend.length - 1];
-    const content = `## ${disease} — 21-Day Trend Analysis
-
-Latest recorded daily figures show **${latest?.cases ?? 0} cases**, **${latest?.recovered ?? 0} recoveries**, and **${latest?.deaths ?? 0} deaths** nationally.
-
-The trend below reflects aggregated case counts across all 64 districts over the past three weeks.`;
+    const insight = await generateInsight(`${disease} — 21-day national trend analysis`, { disease, latest, trend });
     return {
-      content,
+      content: insight.narrative,
       charts: [{ type: "line", title: `${disease} Case Trend`, data: trend, seriesKeys: ["cases", "recovered"] }],
-      recommendations: [`Continue routine surveillance for ${disease}.`, "Cross-reference with hospital admission data for early warning signals."],
+      recommendations: insight.recommendations,
     };
   }
 
-  const content = `## AI Executive Assistant
+  // No specific intent matched -- answer the question directly with the AI,
+  // grounded in a broad real-data snapshot so any question about the platform
+  // can be genuinely answered instead of falling back to a canned menu.
+  const [kpis, alerts, coverage, hospitals] = await Promise.all([
+    getDashboardKpis(),
+    getAlerts({ limit: 10 }),
+    getNationalGisOverview(),
+    getCriticalHospitals(),
+  ]);
+  const reporting = hospitals.filter((h) => h.hasReportedActivity);
 
-I can generate live executive analysis from the national health data platform. Try asking about:
+  const insight = await generateInsight(message, {
+    nationalKpis: kpis,
+    recentAlerts: alerts,
+    coverageTotals: coverage.totals,
+    worstHospitals: hospitals.slice(0, 5),
+    bestHospitals: [...reporting].sort((a, b) => a.criticalityScore - b.criticalityScore).slice(0, 5),
+  });
 
-- **"Which districts have the highest Dengue risk?"**
-- **"Predict ICU demand for the next week."**
-- **"Show current medicine shortages."**
-- **"Compare Dhaka and Chattogram."**
-- **"Generate an executive summary."**
-
-You can also ask about any disease category — COVID-19, Tuberculosis, Diabetes, Hypertension, Cancer, Maternal Health, or Child Health.`;
-
-  return { content };
+  return {
+    content: insight.narrative,
+    recommendations: insight.recommendations,
+  };
 }
 
-export async function generateAiResponse(message: string): Promise<AiResponse> {
-  const lower = message.toLowerCase();
+export async function generateAiResponse(message: string, hospitalId?: string): Promise<AiResponse> {
+  if (hospitalId) {
+    return handleHospitalDetails(hospitalId);
+  }
 
-  if (lower.includes("dengue") && (lower.includes("risk") || lower.includes("district") || lower.includes("highest"))) {
+  if (hasWord(message, "dengue") && (hasWord(message, "risk") || hasWord(message, "district") || hasWord(message, "highest"))) {
     return handleDengueRisk();
   }
-  if (lower.includes("icu")) {
+  if (hasWord(message, "icu")) {
     return handleIcuDemand();
   }
-  if (lower.includes("medicine") || lower.includes("shortage") || lower.includes("stock")) {
+  if (hasWord(message, "medicine") || hasWord(message, "shortage") || hasWord(message, "stock")) {
     return handleMedicineShortages();
   }
-  if (lower.includes("compare")) {
+  if (hasWord(message, "compare")) {
     return handleCompareDistricts(message);
   }
-  if (lower.includes("executive summary") || lower.includes("summary") || lower.includes("report")) {
+  if (hasWord(message, "summary") || hasWord(message, "report")) {
     return handleExecutiveSummary();
   }
   return handleGenericQuery(message);

@@ -15,6 +15,7 @@ import type { CriticalHospital } from "@/types";
 
 export function HotspotTable({
   hospitals,
+  view = "negative",
   isLoading,
   search,
   onSearchChange,
@@ -22,12 +23,14 @@ export function HotspotTable({
   onDivisionChange,
 }: {
   hospitals?: CriticalHospital[];
+  view?: "negative" | "positive";
   isLoading?: boolean;
   search: string;
   onSearchChange: (v: string) => void;
   division: string;
   onDivisionChange: (v: string) => void;
 }) {
+  const isPositive = view === "positive";
   const router = useRouter();
 
   const filtered = useMemo(() => {
@@ -43,7 +46,7 @@ export function HotspotTable({
   return (
     <GlassCard className="p-5">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h3 className="text-sm font-semibold">All Hospitals, Ranked by Criticality</h3>
+        <h3 className="text-sm font-semibold">{isPositive ? "Top Performing Hospitals, Ranked Best First" : "All Hospitals, Ranked by Criticality"}</h3>
         <div className="flex flex-wrap gap-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -70,11 +73,10 @@ export function HotspotTable({
             <TableRow>
               <TableHead>Hospital</TableHead>
               <TableHead>District</TableHead>
-              <TableHead>Primary Issue</TableHead>
-              <TableHead className="text-right">Occupancy</TableHead>
-              <TableHead className="text-right">ICU Free</TableHead>
-              <TableHead className="text-right">Ventilators Free</TableHead>
-              <TableHead className="text-right">Critical + Severe</TableHead>
+              <TableHead>{isPositive ? "Status" : "Primary Issue"}</TableHead>
+              <TableHead className="text-right">Beds</TableHead>
+              <TableHead className="text-right">Admissions</TableHead>
+              <TableHead className="text-right">Case Fatality Rate</TableHead>
               <TableHead className="text-right">Criticality</TableHead>
               <TableHead className="w-8" />
             </TableRow>
@@ -83,7 +85,7 @@ export function HotspotTable({
             {isLoading || !filtered
               ? Array.from({ length: 8 }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 9 }).map((__, j) => (
+                    {Array.from({ length: 8 }).map((__, j) => (
                       <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                     ))}
                   </TableRow>
@@ -97,18 +99,17 @@ export function HotspotTable({
                     <TableCell className="max-w-[220px] truncate font-medium">{h.name}</TableCell>
                     <TableCell className="text-muted-foreground">{h.districtName}</TableCell>
                     <TableCell className="max-w-[200px] truncate text-xs text-muted-foreground">
-                      {h.concerns[0] ?? "No active concerns"}
+                      {h.concerns[0] ?? (isPositive ? "No concerns — stable" : "No active concerns")}
                     </TableCell>
+                    <TableCell className="text-right tabular-nums">{h.beds}</TableCell>
+                    <TableCell className="text-right tabular-nums">{h.admissionTotal.toLocaleString()}</TableCell>
                     <TableCell className="text-right">
                       <StatusBadge
                         showIcon={false}
-                        tone={h.occupancyRate > 90 ? "critical" : h.occupancyRate > 75 ? "warning" : "good"}
-                        label={`${h.occupancyRate.toFixed(0)}%`}
+                        tone={h.caseFatalityRate >= 3 ? "critical" : h.caseFatalityRate >= 1 ? "warning" : "good"}
+                        label={`${h.caseFatalityRate.toFixed(1)}%`}
                       />
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">{h.icuAvailable}/{h.icuBeds}</TableCell>
-                    <TableCell className="text-right tabular-nums">{h.ventilators - h.ventilatorsInUse}/{h.ventilators}</TableCell>
-                    <TableCell className="text-right font-medium tabular-nums text-[var(--status-critical)]">{h.criticalPatients + h.severePatients}</TableCell>
                     <TableCell className="text-right">
                       <StatusBadge showIcon={false} tone={scoreTone(h.criticalityScore)} label={h.criticalityScore.toFixed(1)} />
                     </TableCell>

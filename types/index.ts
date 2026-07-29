@@ -61,6 +61,64 @@ export interface AlertItem {
   createdAt: string;
 }
 
+export interface HospitalStatisticItem {
+  id: number;
+  reportYear: number;
+  hospitalName: string;
+  beds: number;
+  admissionsTotal: number;
+  deathsTotal: number;
+  outdoorVisitsTotal: number;
+}
+
+// Sum of hospital_statistics report columns across every hospital in an area.
+export interface AreaHealthStats {
+  beds: number;
+  admissionMale: number;
+  admissionFemale: number;
+  admissionTotal: number;
+  deathMale: number;
+  deathFemale: number;
+  deathTotal: number;
+  outdoorVisitMale: number;
+  outdoorVisitFemale: number;
+  outdoorVisitChild: number;
+  outdoorVisitTotal: number;
+}
+
+export interface UpazilaHospitalGroup {
+  id: number;
+  name: string;
+  nameBn: string | null;
+  hospitalsCount: number;
+  stats: AreaHealthStats;
+  hospitals: HospitalStatisticItem[];
+}
+
+export interface DistrictHospitalGroup {
+  id: number;
+  name: string;
+  nameBn: string | null;
+  hospitalsCount: number;
+  stats: AreaHealthStats;
+  upazilas: UpazilaHospitalGroup[];
+}
+
+export interface DivisionHospitalGroup {
+  id: number;
+  name: string;
+  nameBn: string | null;
+  hospitalsCount: number;
+  stats: AreaHealthStats;
+  districts: DistrictHospitalGroup[];
+}
+
+export interface NationalGisOverview {
+  reportYear: number;
+  divisions: DivisionHospitalGroup[];
+  totals: { divisions: number; districts: number; upazilas: number; hospitals: number };
+}
+
 export interface GisFilters {
   division?: string;
   district?: string;
@@ -117,61 +175,58 @@ export interface HospitalRow {
   doctorsAvailable: number;
 }
 
+// Sourced from the real `hospital_statistics` report table (2011), joined to
+// `area_info` for division/district/upazila names — see services/hospitals.service.ts.
 export interface CriticalHospital {
-  id: string;
+  id: number;
   name: string;
-  type: string;
+  reportYear: number;
+  upazilaName: string;
   districtName: string;
   divisionName: string;
-  districtRiskLevel: string;
   beds: number;
-  availableBeds: number;
-  occupancyRate: number;
-  icuBeds: number;
-  icuAvailable: number;
-  ventilators: number;
-  ventilatorsInUse: number;
-  waitingTimeMin: number;
-  hasEmergency: boolean;
-  activePatients: number;
-  criticalPatients: number;
-  severePatients: number;
-  criticalRatio: number;
-  activeDistrictIncidents: number;
+  admissionMale: number;
+  admissionFemale: number;
+  admissionTotal: number;
+  deathMale: number;
+  deathFemale: number;
+  deathTotal: number;
+  outdoorVisitMale: number;
+  outdoorVisitFemale: number;
+  outdoorVisitChild: number;
+  outdoorVisitTotal: number;
+  caseFatalityRate: number;
+  admissionsPerBed: number;
+  outdoorVisitsPerBed: number;
   criticalityScore: number;
   concerns: string[];
+  hasReportedActivity: boolean;
+}
+
+export interface AiSuggestion {
+  title: string;
+  detail: string;
+  priority: "High" | "Medium" | "Low";
+}
+
+export interface AiSuggestionsResponse {
+  summary: string;
+  suggestions: AiSuggestion[];
 }
 
 export interface CriticalHospitalDetail extends CriticalHospital {
-  nursesCount: number;
-  doctorsTotal: number;
-  doctorsAvailable: number;
+  nationalRank: number;
+  totalHospitalsNational: number;
+  districtRank: number;
+  totalHospitalsInDistrict: number;
+  divisionRank: number;
+  totalHospitalsInDivision: number;
   scoreBreakdown: {
-    patientSeverityPressure: number;
-    occupancyPressure: number;
-    icuPressure: number;
-    ventilatorPressure: number;
-    waitingPressure: number;
+    fatalityPressure: number;
+    overcrowdingPressure: number;
+    outdoorBurdenPressure: number;
   };
-  severityBreakdown: { mild: number; moderate: number; severe: number; critical: number };
-  recentIncidents: {
-    id: string;
-    type: string;
-    severity: string;
-    status: string;
-    startedAt: string;
-    affectedPopulation: number;
-    description: string;
-  }[];
-  recentAlerts: {
-    id: string;
-    title: string;
-    description: string;
-    category: string;
-    priority: string;
-    aiGenerated: boolean;
-    createdAt: string;
-  }[];
+  districtPeers: { id: number; name: string; upazilaName: string; criticalityScore: number }[];
 }
 
 export interface SavedReport {

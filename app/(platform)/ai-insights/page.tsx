@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import { ChatSidebar } from "@/features/ai-insights/chat-sidebar";
@@ -12,11 +13,11 @@ import { Button } from "@/components/ui/button";
 import { PanelLeft } from "lucide-react";
 import type { ChatMessage } from "@/types";
 
-async function askAi(message: string): Promise<ChatMessage> {
+async function askAi(message: string, hospitalId?: string): Promise<ChatMessage> {
   const res = await fetch("/api/ai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, hospitalId }),
   });
   if (!res.ok) throw new Error("AI request failed");
   return (await res.json()).data;
@@ -26,12 +27,14 @@ export default function AiInsightsPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isThinking, setIsThinking] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const searchParams = useSearchParams();
+  const autoSentRef = useRef(false);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, isThinking]);
 
-  async function handleSend(content: string) {
+  const handleSend = useCallback(async (content: string, hospitalId?: string) => {
     const userMessage: ChatMessage = {
       id: `u_${Date.now()}`,
       role: "user",
@@ -41,7 +44,7 @@ export default function AiInsightsPage() {
     setMessages((prev) => [...prev, userMessage]);
     setIsThinking(true);
     try {
-      const response = await askAi(content);
+      const response = await askAi(content, hospitalId);
       setMessages((prev) => [...prev, response]);
     } catch {
       setMessages((prev) => [
@@ -51,7 +54,20 @@ export default function AiInsightsPage() {
     } finally {
       setIsThinking(false);
     }
-  }
+  }, []);
+
+  // Arrived from a hospital's "Details" button (Action Dashboard) -- auto-ask
+  // the AI Executive Assistant for that hospital's full analysis on load.
+  useEffect(() => {
+    const hospitalId = searchParams.get("hospitalId");
+    if (!hospitalId || autoSentRef.current) return;
+    autoSentRef.current = true;
+    const hospitalName = searchParams.get("hospitalName");
+    const prompt = hospitalName
+      ? `Give me a detailed AI analysis of ${hospitalName}, including its key metrics and how to improve it.`
+      : `Give me a detailed AI analysis of hospital ${hospitalId}, including its key metrics and how to improve it.`;
+    handleSend(prompt, hospitalId);
+  }, [searchParams, handleSend]);
 
   const sidebarContent = (
     <ChatSidebar onSelectReport={handleSend} onNewChat={() => setMessages([])} />

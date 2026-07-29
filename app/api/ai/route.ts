@@ -4,14 +4,15 @@ import { generateAiResponse } from "@/services/ai.service";
 
 const bodySchema = z.object({
   message: z.string().min(1).max(500),
+  hospitalId: z.string().optional(),
 });
 
 export async function POST(request: NextRequest) {
   try {
     const json = await request.json();
-    const { message } = bodySchema.parse(json);
+    const { message, hospitalId } = bodySchema.parse(json);
 
-    const response = await generateAiResponse(message);
+    const response = await generateAiResponse(message, hospitalId);
 
     return NextResponse.json({
       data: {
